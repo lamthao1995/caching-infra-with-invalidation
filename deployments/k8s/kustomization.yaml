@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: caching-infra
+
+commonLabels:
+  app.kubernetes.io/part-of: caching-infra-with-invalidation
+  app.kubernetes.io/managed-by: kustomize
+
+resources:
+  - 00-namespace.yaml
+  - 01-secret.yaml
+  - 02-configmap.yaml
+  - 10-mysql-config.yaml
+  - 11-mysql.yaml
+  - 15-kafka.yaml
+  - 16-kafka-connect.yaml
+  - 17-debezium-connector.yaml
+  - 20-redis.yaml
+  - 30-writer.yaml
+  - 31-reader.yaml
+  - 32-invalidator.yaml
+  - 40-hpa.yaml
+  - 99-ingress.yaml
+
+# Bump these together — every Deployment/StatefulSet references the same tag so a single
+# `kustomize edit set image` (or env override below) rolls every pod consistently.
+images:
+  - name: cache-writer
+    newTag: "0.1.0"
+  - name: cache-reader
+    newTag: "0.1.0"
+  - name: cache-invalidator
+    newTag: "0.1.0"

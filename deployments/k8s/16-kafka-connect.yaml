@@ -1,0 +1,95 @@
+---
+# Service exposes the Connect REST API (port 8083). Used by the registration Job in
+# 17-debezium-connector.yaml to POST the connector config.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-connect
+  labels:
+    app.kubernetes.io/name: kafka-connect
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kafka-connect
+  ports:
+    - name: rest
+      port: 8083
+      targetPort: 8083
+---
+# Distributed Connect cluster of 1 worker, running the Debezium image which already
+# includes the MySQL connector + supporting jars. We deliberately use
+# `quay.io/debezium/connect` instead of `confluentinc/cp-kafka-connect` so we don't have
+# to mount or download the connector at startup.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka-connect
+  labels:
+    app.kubernetes.io/name: kafka-connect
+spec:
+  serviceName: kafka-connect
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka-connect
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka-connect
+    spec:
+      terminationGracePeriodSeconds: 60
+      initContainers:
+        - name: wait-for-kafka
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - >
+              until nc -z -w 1 kafka 9092; do
+                echo "waiting for kafka:9092"; sleep 2;
+              done
+      containers:
+        - name: connect
+          image: quay.io/debezium/connect:2.7.3.Final
+          ports:
+            - { name: rest, containerPort: 8083 }
+          env:
+            - { name: BOOTSTRAP_SERVERS,    value: "kafka:9092" }
+            - { name: GROUP_ID,             value: "connect-cluster" }
+            - { name: CONFIG_STORAGE_TOPIC, value: "connect-configs" }
+            - { name: OFFSET_STORAGE_TOPIC, value: "connect-offsets" }
+            - { name: STATUS_STORAGE_TOPIC, value: "connect-status" }
+            # Single-broker Kafka demands replication factor 1 for the internal topics.
+            - { name: CONFIG_STORAGE_REPLICATION_FACTOR, value: "1" }
+            - { name: OFFSET_STORAGE_REPLICATION_FACTOR, value: "1" }
+            - { name: STATUS_STORAGE_REPLICATION_FACTOR, value: "1" }
+            # JsonConverter without schemas → smaller envelopes, easier to parse on the
+            # consumer side (matches what `DebeziumEnvelope.parse` expects).
+            - { name: KEY_CONVERTER,                       value: "org.apache.kafka.connect.json.JsonConverter" }
+            - { name: VALUE_CONVERTER,                     value: "org.apache.kafka.connect.json.JsonConverter" }
+            - { name: CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE,   value: "false" }
+            - { name: CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE, value: "false" }
+            - { name: REST_ADVERTISED_HOST_NAME,           value: "kafka-connect" }
+          resources:
+            requests: { cpu: "300m", memory: "768Mi" }
+            limits:   { cpu: "1500m", memory: "1536Mi" }
+          readinessProbe:
+            httpGet: { path: /, port: rest }
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /, port: rest }
+            initialDelaySeconds: 90
+            periodSeconds: 15
+            failureThreshold: 4
+          volumeMounts:
+            - { name: data, mountPath: /kafka/data }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 1Gi

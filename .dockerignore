@@ -1,0 +1,12 @@
+**/target/
+**/.idea/
+**/.vscode/
+**/*.iml
+**/.git/
+**/.github/
+**/.DS_Store
+**/coverage/
+**/jacoco.exec
+.env
+.env.*
+deployments/data/

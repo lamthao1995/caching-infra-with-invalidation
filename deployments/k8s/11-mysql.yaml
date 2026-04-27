@@ -1,0 +1,94 @@
+---
+# Headless Service so the StatefulSet pod gets a stable DNS name (mysql-0.mysql) and a
+# stable ClusterIP-mode "mysql" entry that any client (writer, reader, invalidator) can
+# resolve. Single-replica DB, but the StatefulSet pattern keeps the binlog file path stable
+# across restarts which is critical for Debezium's resumability.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  labels:
+    app.kubernetes.io/name: mysql
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  labels:
+    app.kubernetes.io/name: mysql
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mysql
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mysql
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: mysql
+          # MySQL 8.0 (not 8.4): Debezium 2.7.x still issues `SHOW MASTER STATUS`, which
+          # MySQL 8.4 removed. Stay on 8.0 until Debezium 3.0.0.Final.
+          image: mysql:8.0
+          ports:
+            - name: mysql
+              containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom: { secretKeyRef: { name: db-credentials, key: MYSQL_ROOT_PASSWORD } }
+            - name: MYSQL_USER
+              valueFrom: { secretKeyRef: { name: db-credentials, key: MYSQL_USER } }
+            - name: MYSQL_PASSWORD
+              valueFrom: { secretKeyRef: { name: db-credentials, key: MYSQL_PASSWORD } }
+            - name: MYSQL_DATABASE
+              valueFrom: { configMapKeyRef: { name: app-env, key: MYSQL_DATABASE } }
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits:   { cpu: "1",    memory: "1Gi"   }
+          readinessProbe:
+            exec:
+              command: [ "sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\"" ]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: [ "sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\"" ]
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+            - name: conf
+              mountPath: /etc/mysql/conf.d
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: conf
+          configMap:
+            name: mysql-conf
+        - name: init
+          configMap:
+            name: mysql-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 5Gi

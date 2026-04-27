@@ -1,0 +1,206 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# Cancel in-flight runs for the same branch / PR — saves CI minutes when pushing
+# multiple commits in a row.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ─── 1. Java unit + integration tests ────────────────────────────
+  mvn-test:
+    name: mvn verify (JDK 21)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          # Built-in Maven cache: ~/.m2/repository keyed on pom.xml hashes.
+          # Cuts CI time for the second run from ~3 min to ~30 s.
+          cache: maven
+
+      - name: Run tests with coverage
+        run: mvn -B -ntp verify
+
+      - name: Upload Surefire reports (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: '**/target/surefire-reports/'
+          retention-days: 7
+
+      - name: Upload JaCoCo coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-reports
+          path: '**/target/site/jacoco/'
+          retention-days: 7
+
+  # ─── 2. docker-compose YAML / interpolation lint ─────────────────
+  compose-validate:
+    name: docker compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        # `config --quiet` parses the file with full env-var substitution and exits
+        # non-zero on any YAML / variable / volume / port-mapping problem.
+        run: |
+          cp .env.example .env
+          docker compose --env-file .env -f deployments/docker-compose.yml config --quiet
+          echo "OK"
+
+  # ─── 3. Kubernetes manifest validity ─────────────────────────────
+  k8s-validate:
+    name: kustomize build (k8s base)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubectl + kubeconform
+        run: |
+          curl -sSL "https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl" -o kubectl
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /tmp kubeconform
+          sudo mv /tmp/kubeconform /usr/local/bin/
+
+      - name: Build manifests
+        run: kubectl kustomize deployments/k8s > /tmp/manifests.yaml
+
+      - name: Validate against k8s schemas
+        # `-strict` rejects unknown fields; `-summary` prints a one-line per resource;
+        # `-ignore-missing-schemas` lets us pass through HPA/CRD-ish schemas not in the
+        # built-in registry.
+        run: |
+          kubeconform -strict -summary -ignore-missing-schemas \
+            -kubernetes-version 1.31.0 /tmp/manifests.yaml
+
+  # ─── 4. End-to-end smoke against a live compose stack ────────────
+  smoke:
+    name: e2e smoke (compose)
+    runs-on: ubuntu-latest
+    needs: [ mvn-test, compose-validate ]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # Pre-build the stress jar locally (uses the cached ~/.m2). compose's writer /
+      # reader / invalidator images still build inside Docker, but their Maven downloads
+      # also benefit from BuildKit's --mount=type=cache,target=/root/.m2.
+      - name: Build stress jar
+        run: mvn -B -ntp -pl tests/stress -am package -DskipTests
+
+      - name: Boot the stack
+        run: |
+          cp .env.example .env
+          DOCKER_BUILDKIT=1 docker compose --env-file .env \
+            -f deployments/docker-compose.yml up -d --build
+          echo "::group::stack state"
+          docker compose --env-file .env -f deployments/docker-compose.yml ps
+          echo "::endgroup::"
+
+      - name: Wait for services to be ready
+        run: |
+          set -eu
+          for svc in writer:8080/actuator/health/readiness \
+                     reader:8081/actuator/health/readiness \
+                     invalidator:8090/actuator/health \
+                     kafka-connect:8083/connectors/mysql-catalog-items/status; do
+            host=${svc%%:*}
+            path=${svc#*:}
+            echo "waiting for $host ($path) ..."
+            for i in $(seq 1 60); do
+              if curl -sf -m 2 "http://localhost:${path}" >/dev/null; then
+                echo "  $host ready (after $i tries)"
+                break
+              fi
+              [ $i -eq 60 ] && { echo "  TIMEOUT for $host"; exit 1; }
+              sleep 3
+            done
+          done
+
+      - name: End-to-end cache + invalidate flow
+        run: |
+          set -eu
+          # 1. POST → MySQL
+          ID=$(curl -sf -X POST http://localhost:8080/api/v1/items \
+                -H 'Content-Type: application/json' \
+                -d '{"name":"smoke","description":"v1","price_cents":100,"currency":"USD","stock":1}' \
+                | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
+          echo "created id=$ID"
+
+          # 2. First GET — MISS
+          MISS=$(curl -sf -i "http://localhost:8081/api/v1/items/$ID" | grep -i '^X-Cache:' | tr -d '\r')
+          echo "after POST: $MISS"
+          echo "$MISS" | grep -qi 'MISS' || { echo "expected MISS"; exit 1; }
+
+          # 3. Second GET — HIT
+          HIT=$(curl -sf -i "http://localhost:8081/api/v1/items/$ID" | grep -i '^X-Cache:' | tr -d '\r')
+          echo "second GET: $HIT"
+          echo "$HIT" | grep -qi 'HIT' || { echo "expected HIT"; exit 1; }
+
+          # 4. PUT → binlog → kafka → invalidator DELs cache
+          curl -sf -X PUT "http://localhost:8080/api/v1/items/$ID" \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"smoke","description":"v2","price_cents":200,"currency":"USD","stock":1}' >/dev/null
+
+          # 5. Wait up to 15s for the cache to be invalidated (binlog replication lag)
+          for i in $(seq 1 15); do
+            R=$(curl -sf -i "http://localhost:8081/api/v1/items/$ID")
+            CACHE=$(echo "$R" | grep -i '^X-Cache:' | tr -d '\r')
+            if echo "$CACHE" | grep -qi 'MISS'; then
+              echo "  invalidate observed after ${i}s: $CACHE"
+              echo "$R" | tail -1 | grep -q '"description":"v2"' \
+                && { echo "new value visible"; break; } \
+                || { echo "MISS but stale value!"; exit 1; }
+            fi
+            sleep 1
+            [ $i -eq 15 ] && { echo "  TIMEOUT waiting for cache invalidate"; exit 1; }
+          done
+
+      - name: Short stress (10s) sanity check
+        run: |
+          java -jar tests/stress/target/cache-stress.jar \
+            --write-target=http://localhost:8080 \
+            --read-target=http://localhost:8081 \
+            --rps=200 --duration=10s --warmup=2s --workers=8 \
+            --keyspace=200 --read-ratio=0.8 --update-ratio=0.1 | tee stress.txt
+          # Fail if any errors were reported (column 4 of the "errors" line).
+          grep -q 'errors *: *0 ' stress.txt
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          for c in mysql kafka kafka-connect redis writer reader invalidator register-debezium; do
+            echo "::group::$c"
+            docker logs --tail 200 "$c" 2>&1 || true
+            echo "::endgroup::"
+          done
+
+      - name: Tear down
+        if: always()
+        run: docker compose --env-file .env -f deployments/docker-compose.yml down -v
