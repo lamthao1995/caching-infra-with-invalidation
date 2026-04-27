@@ -1,0 +1,84 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: writer
+  labels:
+    app.kubernetes.io/name: writer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: writer
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: writer
+  labels:
+    app.kubernetes.io/name: writer
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: writer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: writer
+    spec:
+      terminationGracePeriodSeconds: 30
+      # Pod-level wait for MySQL: kubelet schedules us as soon as the binding completes,
+      # but Spring Boot will crash-loop if the JDBC pool can't reach the DB. Initialise
+      # with a busybox init that polls the headless Service until it answers on :3306.
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - >
+              until nc -z -w 1 mysql 3306; do
+                echo "waiting for mysql:3306"; sleep 2;
+              done
+      containers:
+        - name: writer
+          image: cache-writer:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef: { name: app-env }
+          env:
+            - name: MYSQL_USER
+              valueFrom: { secretKeyRef: { name: db-credentials, key: MYSQL_USER } }
+            - name: MYSQL_PASSWORD
+              valueFrom: { secretKeyRef: { name: db-credentials, key: MYSQL_PASSWORD } }
+            - name: WRITER_PORT
+              value: "8080"
+          resources:
+            requests: { cpu: "150m", memory: "320Mi" }
+            limits:   { cpu: "1",    memory: "768Mi" }
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 4
+          # Graceful shutdown: Spring Boot waits for in-flight requests to drain.
+          lifecycle:
+            preStop:
+              exec: { command: [ "sh", "-c", "sleep 5" ] }

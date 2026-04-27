@@ -1,0 +1,84 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reader
+  labels:
+    app.kubernetes.io/name: reader
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: reader
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reader
+  labels:
+    app.kubernetes.io/name: reader
+spec:
+  # Reads dominate the workload; default to 3 and let the HPA scale up further
+  # under sustained CPU pressure (see 40-hpa.yaml).
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: reader
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: reader
+    spec:
+      terminationGracePeriodSeconds: 30
+      initContainers:
+        - name: wait-for-deps
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - >
+              until nc -z -w 1 mysql 3306 && nc -z -w 1 redis 6379; do
+                echo "waiting for mysql:3306 + redis:6379"; sleep 2;
+              done
+      containers:
+        - name: reader
+          image: cache-reader:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+          envFrom:
+            - configMapRef: { name: app-env }
+          env:
+            - name: MYSQL_USER
+              valueFrom: { secretKeyRef: { name: db-credentials, key: MYSQL_USER } }
+            - name: MYSQL_PASSWORD
+              valueFrom: { secretKeyRef: { name: db-credentials, key: MYSQL_PASSWORD } }
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: redis-credentials, key: REDIS_PASSWORD } }
+            - name: READER_PORT
+              value: "8081"
+          resources:
+            requests: { cpu: "200m", memory: "320Mi" }
+            limits:   { cpu: "1",    memory: "768Mi" }
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 4
+          lifecycle:
+            preStop:
+              exec: { command: [ "sh", "-c", "sleep 5" ] }

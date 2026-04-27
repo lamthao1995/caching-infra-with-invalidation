@@ -1,16 +1,6 @@
-# Compiled class file
+# ─── Java / Maven ─────────────────────────────────────────────────
+target/
 *.class
-
-# Log file
-*.log
-
-# BlueJ files
-*.ctxt
-
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
-
-# Package Files #
 *.jar
 *.war
 *.nar
@@ -18,7 +8,44 @@
 *.zip
 *.tar.gz
 *.rar
-
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+# ─── IDE ──────────────────────────────────────────────────────────
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.classpath
+.project
+.settings/
+.factorypath
+
+# ─── Spring Boot dev tools ────────────────────────────────────────
+HELP.md
+.mvn/
+mvnw
+mvnw.cmd
+
+# ─── Env / secrets ────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ─── Logs / coverage ──────────────────────────────────────────────
+*.log
+logs/
+coverage/
+jacoco.exec
+**/jacoco-reports/
+
+# ─── Local Docker volumes (when bind-mounted) ─────────────────────
+deployments/data/
+
+# ─── OS ───────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Invalidator local state ──────────────────────────────────────
+deployments/invalidator/data/

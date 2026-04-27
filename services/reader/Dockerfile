@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1.7
+FROM maven:3.9.8-eclipse-temurin-21 AS build
+WORKDIR /workspace
+
+COPY pom.xml ./
+COPY services/common/pom.xml      services/common/pom.xml
+COPY services/writer/pom.xml      services/writer/pom.xml
+COPY services/reader/pom.xml      services/reader/pom.xml
+COPY services/invalidator/pom.xml services/invalidator/pom.xml
+COPY tests/stress/pom.xml         tests/stress/pom.xml
+
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B -ntp -pl services/reader -am dependency:go-offline -DskipTests
+
+COPY services/common/src services/common/src
+COPY services/reader/src services/reader/src
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B -ntp -pl services/reader -am package -DskipTests
+
+FROM gcr.io/distroless/java21-debian12:debug-nonroot
+COPY --from=build /workspace/services/reader/target/cache-reader.jar /app.jar
+USER nonroot:nonroot
+EXPOSE 8081
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-XX:+ExitOnOutOfMemoryError", "-jar", "/app.jar"]

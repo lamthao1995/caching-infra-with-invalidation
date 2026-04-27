@@ -1,0 +1,39 @@
+---
+# Hostname-based routing so writes and reads land on different upstreams. To exercise it
+# locally with kind/minikube + nginx-ingress:
+#
+#   echo "127.0.0.1 writer.cache.local reader.cache.local" | sudo tee -a /etc/hosts
+#   curl -X POST http://writer.cache.local/api/v1/items -d '...'
+#   curl http://reader.cache.local/api/v1/items/1
+#
+# In a managed cluster swap the ingressClassName + add TLS via cert-manager.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: caching-infra
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: writer.cache.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: writer
+                port:
+                  number: 8080
+    - host: reader.cache.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: reader
+                port:
+                  number: 8081

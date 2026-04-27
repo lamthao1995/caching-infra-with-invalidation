@@ -1,0 +1,84 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: invalidator
+  labels:
+    app.kubernetes.io/name: invalidator
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: invalidator
+  ports:
+    - name: management
+      port: 8090
+      targetPort: 8090
+---
+# Plain Deployment now (was StatefulSet in the embedded design): the consumer is
+# stateless w.r.t. the binlog — Kafka stores the consumer-group offset, not us.
+# Replicas can be scaled freely up to the topic partition count; Kafka's group
+# rebalance handles partition assignment automatically on roll/restart.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: invalidator
+  labels:
+    app.kubernetes.io/name: invalidator
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: invalidator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: invalidator
+    spec:
+      terminationGracePeriodSeconds: 30
+      initContainers:
+        - name: wait-for-deps
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - >
+              until nc -z -w 1 kafka 9092 && nc -z -w 1 redis 6379; do
+                echo "waiting for kafka:9092 + redis:6379"; sleep 2;
+              done
+      containers:
+        - name: invalidator
+          image: cache-invalidator:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: management
+              containerPort: 8090
+          envFrom:
+            - configMapRef: { name: app-env }
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: redis-credentials, key: REDIS_PASSWORD } }
+            - name: INVALIDATOR_MGMT_PORT
+              value: "8090"
+          resources:
+            requests: { cpu: "150m", memory: "320Mi" }
+            limits:   { cpu: "1",    memory: "768Mi" }
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: management }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: management }
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 4
+          # PreStop sleep gives Spring Kafka time to commit the in-flight batch and leave
+          # the consumer group cleanly so the rebalance is fast.
+          lifecycle:
+            preStop:
+              exec: { command: [ "sh", "-c", "sleep 5" ] }

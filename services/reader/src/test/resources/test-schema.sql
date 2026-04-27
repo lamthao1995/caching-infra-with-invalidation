@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS items;
+CREATE TABLE items (
+  id           BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name         VARCHAR(200) NOT NULL,
+  description  VARCHAR(2000),
+  price_cents  BIGINT       NOT NULL DEFAULT 0,
+  currency     VARCHAR(8)   NOT NULL DEFAULT 'USD',
+  stock        INT,
+  created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

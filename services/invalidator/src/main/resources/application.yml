@@ -1,0 +1,49 @@
+server:
+  port: ${INVALIDATOR_MGMT_PORT:8090}
+  shutdown: graceful
+
+spring:
+  application:
+    name: cache-invalidator
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 1s
+      connect-timeout: 2s
+      lettuce:
+        pool:
+          enabled: true
+          max-active: 32
+          max-idle: 16
+          min-idle: 4
+
+app:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    topic:             ${KAFKA_TOPIC:cdc.catalog.items}
+    group:             ${KAFKA_GROUP:cache-invalidator}
+    concurrency:       ${KAFKA_CONCURRENCY:3}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  level:
+    root: INFO
+    io.github.lamthao1995: INFO
+    org.apache.kafka: WARN
+    org.springframework.kafka: INFO

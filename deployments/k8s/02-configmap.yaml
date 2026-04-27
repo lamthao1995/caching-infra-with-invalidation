@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-env
+data:
+  # ─── MySQL connection (used by writer + reader) ──────────────────────────
+  MYSQL_HOST: "mysql"
+  MYSQL_PORT: "3306"
+  MYSQL_DATABASE: "catalog"
+
+  # ─── Redis connection (used by reader + invalidator) ─────────────────────
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+
+  # ─── Cache-aside reader behaviour ────────────────────────────────────────
+  CACHE_TTL: "10m"
+
+  # ─── Invalidator (Kafka consumer of Debezium CDC events) ─────────────────
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  KAFKA_TOPIC:             "cdc.catalog.items"
+  KAFKA_GROUP:             "cache-invalidator"
+  # Concurrency = number of partitions the listener spawns per replica. Topic has 6
+  # partitions (see 17-debezium-connector.yaml topic.creation.default.partitions); with
+  # 3 replicas and concurrency=2, each pod owns 2 partitions for parallel processing.
+  KAFKA_CONCURRENCY:       "2"
