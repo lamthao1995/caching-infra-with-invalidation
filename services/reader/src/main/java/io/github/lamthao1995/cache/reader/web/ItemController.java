@@ -30,6 +30,24 @@ import java.util.Optional;
  * The {@code X-Cache} header is what the stress generator splits on; without it the load
  * report cannot tell hot reads (Redis) from cold reads (MySQL) and the whole experiment
  * is meaningless.
+ *
+ * <h2>Eventual consistency note</h2>
+ * This is the textbook cache-aside read-then-write race:
+ * <ol>
+ *   <li>Reader misses Redis and starts loading row {@code N} from MySQL.</li>
+ *   <li>Writer commits an UPDATE; Debezium publishes; invalidator DELs Redis key.</li>
+ *   <li>Reader's {@code cache.put(...)} stores the now-stale snapshot back into Redis.</li>
+ * </ol>
+ * The stale value lives until {@code CACHE_TTL} expires. We accept this trade-off in
+ * exchange for keeping the write path off the cache (no dual-write, no two-phase commit
+ * to the cache + DB). If stronger freshness is required, options include:
+ * <ul>
+ *   <li>Cache the row's {@code updated_at} alongside the value and discard cache writes
+ *       whose timestamp is older than the version Redis already holds.</li>
+ *   <li>Issue a delayed second {@code DEL} from the invalidator (the so-called
+ *       "Facebook double-delete"), trading a tiny extra DB hit for closing the window.</li>
+ *   <li>Use Redis transactions (MULTI/WATCH) keyed by {@code updated_at} when writing back.</li>
+ * </ul>
  */
 @RestController
 @RequestMapping("/api/v1/items")

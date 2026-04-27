@@ -63,6 +63,15 @@
                 <executions>
                     <execution>
                         <goals><goal>repackage</goal></goals>
+                        <configuration>
+                            <!-- Produce target/cache-writer-exec.jar (the fat jar) and leave
+                                 target/cache-writer.jar as the plain jar. Failsafe runs *IT
+                                 in the integration-test phase AFTER package; without the
+                                 classifier, repackage replaces the main artifact with a fat
+                                 jar (classes under BOOT-INF/classes/), and Failsafe's
+                                 classloader can no longer find the test classes. -->
+                            <classifier>exec</classifier>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

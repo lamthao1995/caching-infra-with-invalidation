@@ -78,7 +78,8 @@ spec:
             periodSeconds: 20
             failureThreshold: 4
           # PreStop sleep gives Spring Kafka time to commit the in-flight batch and leave
-          # the consumer group cleanly so the rebalance is fast.
+          # the consumer group cleanly so the rebalance is fast. Distroless :debug-nonroot
+          # ships busybox under /busybox (not on PATH), so call `sleep` directly.
           lifecycle:
             preStop:
-              exec: { command: [ "sh", "-c", "sleep 5" ] }
+              exec: { command: [ "/busybox/sleep", "5" ] }

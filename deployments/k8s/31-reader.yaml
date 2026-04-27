@@ -81,4 +81,4 @@ spec:
             failureThreshold: 4
           lifecycle:
             preStop:
-              exec: { command: [ "sh", "-c", "sleep 5" ] }
+              exec: { command: [ "/busybox/sleep", "5" ] }

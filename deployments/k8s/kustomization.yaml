@@ -3,9 +3,14 @@ kind: Kustomization
 
 namespace: caching-infra
 
-commonLabels:
-  app.kubernetes.io/part-of: caching-infra-with-invalidation
-  app.kubernetes.io/managed-by: kustomize
+# `commonLabels` is deprecated since Kustomize v5; the modern form is `labels` with an
+# `includeSelectors:false` block so we don't accidentally rewrite Service/Deployment
+# selectors on rolling deploys (which would orphan existing pods).
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: caching-infra-with-invalidation
+      app.kubernetes.io/managed-by: kustomize
 
 resources:
   - 00-namespace.yaml

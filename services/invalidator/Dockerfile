@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/root/.m2 \
     mvn -B -ntp -pl services/invalidator -am package -DskipTests
 
 FROM gcr.io/distroless/java21-debian12:debug-nonroot
-COPY --from=build /workspace/services/invalidator/target/cache-invalidator.jar /app.jar
+COPY --from=build /workspace/services/invalidator/target/cache-invalidator-exec.jar /app.jar
 USER nonroot:nonroot
 EXPOSE 8090
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-XX:+ExitOnOutOfMemoryError", "-jar", "/app.jar"]

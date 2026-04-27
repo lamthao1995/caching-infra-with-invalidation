@@ -63,9 +63,24 @@
 | **CDC pipeline**  | Debezium MySQL connector publishes binlog events to Kafka topic `cdc.catalog.items` (key=primary key, JSON envelope); 6 partitions; topic + schema-history auto-created.                                  |
 | **Invalidator**   | Stateless Kafka consumer (`@KafkaListener`); parses Debezium envelope, extracts PK, `DEL v1:item:{id}`; idempotent `DEL` so re-delivery is safe; horizontally scalable up to topic partition count.       |
 | **Storage**       | MySQL 8.0 with `binlog-format=ROW`, `binlog-row-image=FULL`, GTID on; Redis 7 with AOF (`everysec`) + `allkeys-lru` so the cache survives restarts and self-evicts under pressure.                        |
-| **Tests**         | 30 unit/integration tests across 6 modules: pure-function validators, JdbcTemplate against H2 (MySQL-compat), MockMvc handlers, mocked Redis, Debezium envelope parser, HdrHistogram bucket invariants.   |
+| **Tests**         | 37 unit/integration tests across 6 modules: pure-function validators, JdbcTemplate against H2 (MySQL-compat), MockMvc handlers (Failsafe `*IT.java`), mocked Redis, Debezium envelope parser, HdrHistogram bucket invariants, Reporter formatting.   |
 | **Stress**        | Custom Java 21 load generator on virtual threads + HdrHistogram; reports separate p50/p95/p99 for **write / update / read-HIT / read-MISS** so the cache value is visible in the numbers.                |
 | **Deploy**        | `make compose-up` brings the full stack up on one host (~30 s cold), `make k8s-up` deploys the same components to a kind cluster with HPAs, PVCs, and an Ingress.                                         |
+
+### Consistency model
+
+This is **eventual consistency** by design — the write path is "MySQL first, cache later
+via binlog". Concretely:
+
+- Within a few hundred ms of a successful write the binlog event flows
+  `MySQL → Debezium → Kafka → invalidator → DEL Redis` and the next read on that key
+  goes back to MySQL.
+- A stale value can survive for **at most one `CACHE_TTL` window** in the unhappy case
+  documented in
+  [`ItemController` Javadoc](services/reader/src/main/java/io/github/lamthao1995/cache/reader/web/ItemController.java)
+  — a reader's "load from DB → SETEX" can land *after* the invalidator's `DEL`. If you
+  need stronger freshness the controller comment lists three drop-in options
+  (`updated_at` compare-and-set; double-delete; MULTI/WATCH).
 
 ---
 
@@ -265,7 +280,8 @@ java -jar tests/stress/target/cache-stress.jar \
 ## Running the tests
 
 ```bash
-mvn -B verify          # all 30 tests across 6 modules + JaCoCo reports
+mvn -B verify          # all 37 tests across 6 modules + JaCoCo reports
+                       # (Surefire runs *Test.java in unit phase, Failsafe runs *IT.java in integration phase)
 ```
 
 | Module             | What it covers                                                                                                         |
