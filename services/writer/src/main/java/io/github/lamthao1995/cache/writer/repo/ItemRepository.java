@@ -10,7 +10,6 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.PreparedStatement;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Objects;
@@ -47,10 +46,15 @@ public class ItemRepository {
     public Item insert(Item item) {
         KeyHolder keys = new GeneratedKeyHolder();
         jdbc.update(con -> {
+            // Request the `id` column by name (not Statement.RETURN_GENERATED_KEYS): some
+            // JDBC drivers — H2's MySQL-compat mode and certain MySQL connector versions —
+            // surface every column with a default-on-insert (id, created_at, updated_at) as
+            // generated, which then breaks `keys.getKey()` ("multiple keys returned").
+            // Asking for a single column makes the result deterministic across drivers.
             PreparedStatement ps = con.prepareStatement(
                     "INSERT INTO items (name, description, price_cents, currency, stock) "
                             + "VALUES (?, ?, ?, ?, ?)",
-                    Statement.RETURN_GENERATED_KEYS);
+                    new String[]{"id"});
             ps.setString(1, item.name());
             ps.setString(2, item.description());
             ps.setLong(3, item.priceCents());

@@ -30,6 +30,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <scope>runtime</scope>
+        </dependency>
         <!-- We need an embedded HTTP server so /actuator/health is reachable from
              docker / k8s probes; -starter-web also pulls Jackson auto-config which
              provides the ObjectMapper bean CdcEventConsumer expects. -->
@@ -73,6 +78,11 @@
                 <executions>
                     <execution>
                         <goals><goal>repackage</goal></goals>
+                        <configuration>
+                            <!-- Same pattern as writer / reader so all three services
+                                 produce target/cache-<service>-exec.jar uniformly. -->
+                            <classifier>exec</classifier>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

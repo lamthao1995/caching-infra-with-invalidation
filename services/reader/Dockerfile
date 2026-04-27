@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/root/.m2 \
     mvn -B -ntp -pl services/reader -am package -DskipTests
 
 FROM gcr.io/distroless/java21-debian12:debug-nonroot
-COPY --from=build /workspace/services/reader/target/cache-reader.jar /app.jar
+COPY --from=build /workspace/services/reader/target/cache-reader-exec.jar /app.jar
 USER nonroot:nonroot
 EXPOSE 8081
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-XX:+ExitOnOutOfMemoryError", "-jar", "/app.jar"]

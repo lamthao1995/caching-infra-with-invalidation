@@ -122,7 +122,14 @@ services:
         condition: service_started
     entrypoint: ["/bin/sh", "/scripts/register.sh"]
     environment:
-      CONNECT_URL: "http://kafka-connect:8083"
+      CONNECT_URL:             "http://kafka-connect:8083"
+      # The script renders connector.json with these placeholders before POSTing it.
+      MYSQL_HOST:              "mysql"
+      MYSQL_PORT:              "3306"
+      MYSQL_DATABASE:          "${MYSQL_DATABASE:-catalog}"
+      CDC_USER:                "${MYSQL_USER:-app}"
+      CDC_PASSWORD:            "${MYSQL_PASSWORD:-app}"
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
     volumes:
       - ./connect/connector.json:/etc/connector/connector.json:ro
       - ./connect/register.sh:/scripts/register.sh:ro

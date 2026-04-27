@@ -32,12 +32,18 @@ public final class Reporter {
         double readN   = hits + misses;
         double hitRatio = readN == 0 ? 0.0 : hits / readN;
 
+        // Denominator = total successful ops + errors. If both are zero the run produced
+        // nothing (e.g. seed crashed) — print 0% instead of NaN. Previously this was
+        // `total == 0 ? 0.0 : 100.0 * errs / (total + errs)`, which printed "0.000%" even
+        // when *every* request errored (since total-success was 0), grossly misleading.
+        long denominator = total + errs;
+        double errorPercent = denominator == 0 ? 0.0 : 100.0 * errs / denominator;
+
         out.println("---- stress report ----");
         out.printf(Locale.ROOT, "duration       : %.2fs%n", seconds);
         out.printf(Locale.ROOT, "target rps     : %d%n", cfg.rps());
         out.printf(Locale.ROOT, "achieved rps   : %,.1f (%,d ops)%n", rps, total);
-        out.printf(Locale.ROOT, "errors         : %,d (%.3f%%)%n",
-                errs, total == 0 ? 0.0 : 100.0 * errs / (total + errs));
+        out.printf(Locale.ROOT, "errors         : %,d (%.3f%%)%n", errs, errorPercent);
         out.printf(Locale.ROOT, "cache hit ratio: %.2f%% (%,d hits / %,d misses)%n",
                 100.0 * hitRatio, hits, misses);
         out.println();

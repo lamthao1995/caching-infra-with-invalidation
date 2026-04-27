@@ -2,17 +2,17 @@
   "connector.class":              "io.debezium.connector.mysql.MySqlConnector",
   "tasks.max":                    "1",
 
-  "database.hostname":            "mysql",
-  "database.port":                "3306",
-  "database.user":                "app",
-  "database.password":            "app",
+  "database.hostname":            "${MYSQL_HOST}",
+  "database.port":                "${MYSQL_PORT}",
+  "database.user":                "${CDC_USER}",
+  "database.password":            "${CDC_PASSWORD}",
   "database.server.id":           "1002",
 
   "topic.prefix":                 "cdc",
-  "database.include.list":        "catalog",
-  "table.include.list":           "catalog.items",
+  "database.include.list":        "${MYSQL_DATABASE}",
+  "table.include.list":           "${MYSQL_DATABASE}.items",
 
-  "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+  "schema.history.internal.kafka.bootstrap.servers": "${KAFKA_BOOTSTRAP_SERVERS}",
   "schema.history.internal.kafka.topic":             "cdc.schema-history.internal",
 
   "include.schema.changes":       "false",

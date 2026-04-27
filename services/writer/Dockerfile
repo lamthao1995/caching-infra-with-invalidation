@@ -32,7 +32,10 @@ RUN --mount=type=cache,target=/root/.m2 \
 # pulling in a full distro. K8s probes use kubelet's built-in httpGet and don't need this,
 # but the same image runs in both places.
 FROM gcr.io/distroless/java21-debian12:debug-nonroot
-COPY --from=build /workspace/services/writer/target/cache-writer.jar /app.jar
+# Use the *-exec.jar (Spring Boot fat jar). The plain target/cache-writer.jar is left
+# behind on the build stage so Failsafe IT tests can resolve test classes via the normal
+# project classpath; see services/writer/pom.xml for the classifier rationale.
+COPY --from=build /workspace/services/writer/target/cache-writer-exec.jar /app.jar
 USER nonroot:nonroot
 EXPOSE 8080
 # MaxRAMPercentage lets the JVM size the heap from the cgroup limit instead of
