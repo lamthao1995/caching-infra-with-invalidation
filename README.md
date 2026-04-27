@@ -11,6 +11,11 @@
 
 ## Architecture
 
+![Architecture: MySQL → Debezium binlog → Kafka → invalidator → Redis (cache-aside reads)](docs/img/architecture.png)
+
+<details>
+<summary>Text diagram (for terminals)</summary>
+
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────┐
 │                           Docker Compose / Kubernetes                            │
@@ -53,6 +58,8 @@
 │       client                                                                     │
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+</details>
 
 ## Key capabilities
 
